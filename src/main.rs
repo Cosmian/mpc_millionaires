@@ -195,18 +195,9 @@ fn secretly_rank(values: &Slice<SecretI64>, descending: bool) -> Slice<SecretI64
                 ranks.set(left, &(*ranks.get_unchecked(left) + cmp));
                 ranks.set(right, &(*ranks.get_unchecked(right) - cmp));
             }
-            let alice_rank = ranks.get_unchecked(0);
-            let v = alice_rank.reveal();
-            println!("ALICE ", v);
-            let bob_rank = ranks.get_unchecked(1);
-            let v = bob_rank.reveal();
-            println!("BOB ", v);
-            let charlie_rank = ranks.get_unchecked(1);
-            let v = charlie_rank.reveal();
-            println!("CHARLIE ", v);
         }
     }
-    ranks
+    rescale(&ranks)
 }
 
 #[inline(always)]
