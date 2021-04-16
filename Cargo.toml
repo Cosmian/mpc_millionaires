@@ -6,7 +6,7 @@ edition = "2018"
 
 [[bin]]
 name="scale_wasm"
-# test=false
+test=false
 bench=false
 path="src/main.rs"
 
@@ -26,6 +26,3 @@ panic = "abort"
 lto = true
 codegen-units = 1
 
-[patch.crates-io]
-scale_impl_generator={path="./src/scale_impl_generator_bgr"}
-scale-core={path="./src/scale-core-bgr"}
