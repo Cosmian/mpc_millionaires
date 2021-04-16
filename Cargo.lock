@@ -130,8 +130,6 @@ checksum = "71d301d4193d031abdd79ff7e3dd721168a9572ef3fe51a1517aba235bd8f86e"
 [[package]]
 name = "scale-core"
 version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6392f535433b89fbf2e1fcf09e665f24b8e3cb72eb24f84bf67693ce1e3b991b"
 dependencies = [
  "lazy_static",
  "num-bigint",
@@ -165,8 +163,6 @@ dependencies = [
 [[package]]
 name = "scale_impl_generator"
 version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c93cc602fd4f6b68ae86c3d8396f358e625cdadbc4da3bc5249c9c2a7645ed99"
 dependencies = [
  "num-bigint",
  "num-integer",

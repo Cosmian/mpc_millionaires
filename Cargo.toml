@@ -26,3 +26,6 @@ panic = "abort"
 lto = true
 codegen-units = 1
 
+[patch.crates-io]
+scale_impl_generator={path="./vendor/scale_impl_generator_patch"}
+scale-core={path="./vendor/scale-core-patch"}
