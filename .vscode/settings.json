@@ -1,0 +1,6 @@
+{
+    "rust-analyzer.runnableEnv": {
+        "RUST_BACKTRACE": 1,
+        "RUSTC_BOOTSTRAP": 1
+    },
+}
