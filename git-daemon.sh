@@ -10,4 +10,6 @@
 # 4. Create/update a computation using the git URL above and the commit you want to test
 # 5. Run the computation fron the UI
 
-git daemon --reuseaddr --base-path=$(pwd)/.. --export-all $(pwd)/..
+echo "git daemon starting on port 9418...ctrl+c to stop"
+git daemon --reuseaddr --base-path=$(pwd)/.. --export-all --verbose $(pwd)/..
+echo "git daemon stopped"

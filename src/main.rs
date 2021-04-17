@@ -9,25 +9,25 @@ use cosmian_std::{scale, scale::println, InputRow, OutputRow};
 use scale_std::slice::Slice;
 
 // Players list
-
 const ALICE: Player<0> = Player::<0>;
 const BOB: Player<1> = Player::<1>;
 const CHARLIE: Player<2> = Player::<2>;
 
 // the numbér of columns provided by the players
-// year, net_worth
+// i.e (year, wealth)
 const NUM_COLS: u64 = 2;
 
-// Example program
 #[cosmian_std::main(KAPPA = 40)]
 #[inline(never)]
 fn main() {
     println!("Program starting");
-    // a simple row counter to improve debug information
-    // this is a clear text value which is visible as such in the program memory
+    // A simple row counter which is only there to improve debug information.
+    // This is a clear text value which is visible as such in the program memory
+    // and is therefore "leaked". Remove it with the associated `print()` lines
+    // if you want to hide this information
     let mut row_counter: u64 = 0;
     loop {
-        // Read the rows of Alice ono by one
+        // Read the rows of Alice one by one
         let alice_next_now = match read_tabular(ALICE, NUM_COLS) {
             None => {
                 //no more records => end of program
@@ -39,10 +39,11 @@ fn main() {
         row_counter += 1;
         println!("Processing Alice row ", row_counter);
         // we can use `get_unchecked` here
-        // because `read_tabular` guarantees that we have 2 columns
-        // these values are `SecretModP` i.e. secret/encrypted values
+        // because `read_tabular` guarantees that we have 2 columns,
+        // These values have type `SecretModp` i.e. they are secret/encrypted values
+        // and are not visible in the players program memory
         let alice_year = *alice_next_now.get_unchecked(0);
-        let alice_net_worth = *alice_next_now.get_unchecked(1);
+        let alice_wealth = *alice_next_now.get_unchecked(1);
         // now (secretly) find the same year on Bob's records
         let bob_row = match find_tabular(BOB, 0, &alice_year, NUM_COLS) {
             None => {
@@ -52,7 +53,7 @@ fn main() {
             }
             Some(row) => row,
         };
-        let bob_net_worth = *bob_row.get_unchecked(1);
+        let bob_wealth = *bob_row.get_unchecked(1);
         // same thing with Charlie
         let charlie_row = match find_tabular(CHARLIE, 0, &alice_year, NUM_COLS) {
             None => {
@@ -62,44 +63,53 @@ fn main() {
             }
             Some(row) => row,
         };
-        let charlie_net_worth = *charlie_row.get_unchecked(1);
+        let charlie_wealth = *charlie_row.get_unchecked(1);
 
-        // we have now collected all the secret net worth for the years
+        // we have now collected all the secret wealth of all participants for the year
 
         // Prepare `OutputRow`s to reveal data to the players
         let mut alice_output = OutputRow::new(ALICE);
         let mut bob_output = OutputRow::new(BOB);
         let mut charlie_output = OutputRow::new(CHARLIE);
 
-        // The `year` is the data we want to output in each column
+        // The `year` is the data we want to output in the first column of each participant
         alice_output.append(alice_year);
         bob_output.append(alice_year);
         charlie_output.append(alice_year);
 
-        // let us calculate the net worth total which we are going to reveal to all participants
-        let net_total: SecretModp = alice_net_worth + bob_net_worth + charlie_net_worth;
+        // In the second column, we will output back its **own** wealth
+        // to each participant
+        alice_output.append(alice_wealth);
+        bob_output.append(bob_wealth);
+        charlie_output.append(charlie_wealth);
+
+        // Let us calculate the total wealth for the year
+        // which we are going to reveal to all participants in the 3rd column
+        // Arithmetic operations are performed over the `SecretModp` type
+        // They can mix secret and clear text scalars
+        let total_wealth: SecretModp = alice_wealth + bob_wealth + charlie_wealth;
         // the total is still secret. We can selectively choose who we are
-        // going to reveal it to. In this case: all participants
-        alice_output.append(net_total);
-        bob_output.append(net_total);
-        charlie_output.append(net_total);
+        // going to reveal it to. In this case: we reveal it to all participants
+        alice_output.append(total_wealth);
+        bob_output.append(total_wealth);
+        charlie_output.append(total_wealth);
 
         // the final step is to calculate the rank for each participant
-        // and reveal that to the participant only. So we must make sure
+        // and reveal it that to the participant only. We must therefore make sure
         // our ranking algorithms does not reveal/leak any information.
-        // This what the algorithms below does
+        // This is exactly what the `secretly_rank` algorithm below does
 
-        // First, we prepare a Slice with the net worths
+        // First, we prepare a Slice with the wealths
         // Since secret comparisons are performed on boolean circuits
-        // we need to switch to another representation for the net worths
-        let mut secret_net_worths: Slice<SecretI64> = Slice::uninitialized(3);
-        secret_net_worths.set(0, &SecretI64::from(alice_net_worth));
-        secret_net_worths.set(1, &SecretI64::from(bob_net_worth));
-        secret_net_worths.set(2, &SecretI64::from(charlie_net_worth));
+        // we need to switch to another integer representation for the wealths
+        let mut secret_wealths: Slice<SecretI64> = Slice::uninitialized(3);
+        secret_wealths.set(0, &SecretI64::from(alice_wealth));
+        secret_wealths.set(1, &SecretI64::from(bob_wealth));
+        secret_wealths.set(2, &SecretI64::from(charlie_wealth));
 
         // call the ranking algorithm which is going to output the ranks
         // in the same order as the inputs
-        let ranks = secretly_rank(&secret_net_worths, true);
+        let ranks = secretly_rank(&secret_wealths, true);
 
         // privately output its rank to each participant
         alice_output.append(SecretModp::from(*ranks.get_unchecked(0)));
@@ -112,6 +122,9 @@ fn main() {
     println!(".... end of Program");
 }
 
+/// Read input data from a Player and expect it to be in a tabular format
+/// with one scalar per column and a fixed number of columns
+/// (e.g. a row of a CSV file)
 fn read_tabular<const P: u32>(player: Player<P>, num_cols: u64) -> Option<Slice<SecretModp>> {
     let mut row = InputRow::read(player);
     let mut result = Slice::uninitialized(num_cols);
@@ -151,6 +164,8 @@ fn read_tabular<const P: u32>(player: Player<P>, num_cols: u64) -> Option<Slice<
     Some(result)
 }
 
+/// Read tabular rows of data of a Player (see `read_tabular`)
+/// Until it finds `value` in the column `column` number (starting from 0)
 fn find_tabular<const P: u32>(
     player: Player<P>,
     column: u64,
@@ -180,6 +195,15 @@ fn find_tabular<const P: u32>(
     }
 }
 
+/// Rank the values from 1..n provided in tre `values` slice of size `n`.
+/// The output slice will contain the rank of the corresponding value in the
+/// `values` input slice i.e input values of:
+///
+///  -  Secret([11, 33, 22]) will output Secret([1, 3, 2 ]) ascending
+///  -  Secret([11, 33, 22]) will output Secret([3, 1, 2 ]) descending
+///
+/// The algorithm is designed in such a way all data stay secret
+/// during the processing and nothing is revealed
 fn secretly_rank(values: &Slice<SecretI64>, descending: bool) -> Slice<SecretI64> {
     let n = values.len();
     let mut ranks: Slice<SecretI64> = Slice::uninitialized(n);
@@ -200,12 +224,22 @@ fn secretly_rank(values: &Slice<SecretI64>, descending: bool) -> Slice<SecretI64
     rescale(&ranks)
 }
 
+/// Secretly compare 2 secret values.
+///
+/// This function returns a **secret**
+///
+/// - Secret(-1) if a <= b
+/// - Secret(1) otherwise
 #[inline(always)]
 fn cmp(a: &SecretI64, b: &SecretI64) -> SecretI64 {
     let cmp: SecretI64 = a.le(*b).into();
     -2 * cmp + 1
 }
 
+/// Used by the `rank` function to rescale the ranks before output.
+///
+/// The base arithmetic algorithm will rank 3 values outputting [-2,0,2],
+/// This rescales the ranks to [1,2,3]
 fn rescale(indexes: &Slice<SecretI64>) -> Slice<SecretI64> {
     let n = indexes.len();
     let n_1 = SecretI64::from(n as i64 - 1);
@@ -219,13 +253,18 @@ fn rescale(indexes: &Slice<SecretI64>) -> Slice<SecretI64> {
     rescaled
 }
 
+// To run the tests below, use the provided `test.sh` script
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_example() {
-        // An example of test which can be run with `bash test.sh`
-        cosmian_std::test!("example");
+        // An example of a successful test
+        // which input and expected output data are located
+        // in the `fixtures/success_test` folder
+        cosmian_std::test!("success_test");
+        // If you change any data in the input or output files,
+        // the test will fail
     }
 }

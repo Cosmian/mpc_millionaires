@@ -1,26 +1,24 @@
-# Rust MPC template
+# MPC Millionaires
 
-Here is a template to create your first own Rust MPC program and it must be used by [cargo scaffold](https://github.com/iomentum/cargo-scaffold).
+Alice, Bob and Charlie are all millionaires.
 
-## Installation
+The would like to know their total wealth and 
+how they compare to each other over 3 years,
+**without** disclosing their wealth to each other.
 
-If you don't have already cargo scaffold installed on your machine you just have to launch:
+This is a somewhat more elaborated version of the famous 
+[Yao's Millionaires' problem](https://en.wikipedia.org/wiki/Yao%27s_Millionaires%27_problem) which
+demonstrates the ability of CipherCompute to perform calculations mixing arithmetic and non-linear
+operations.
 
-```
-cargo install cargo-scaffold
-```
+## Hack it !
 
-## Usage
+The code is heavily documented and under MIT license as it is meant to be hacked for your purpose.
 
-To scaffold your Rust MPC program:
+It is actually very easy to generalize this code for all confidential Key Performance Indicators 
+comparisons across entities with minor modifications.
 
-```
-cargo scaffold https://github.com/Cosmian/mpc_rust_template.git
-```
+Do not hesitate to open issues or PRs to improve the quality of this code 
+and its documentation.
 
-Let you be guided by the instructions displayed in your terminal to launch, emulate and test your first Rust MPC program.
 
-Have fun and feel free to make pull-requests to add features to this template and also report issues.
-
-## Demo
-[![asciicast](https://asciinema.org/a/Fmj2hhuzkoazAaSavasJPjfjL.svg)](https://asciinema.org/a/Fmj2hhuzkoazAaSavasJPjfjL)
