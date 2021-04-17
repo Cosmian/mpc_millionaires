@@ -25,3 +25,6 @@ panic = "abort"
 # LTO really cleans up the amount of wasm that is generated
 lto = true
 codegen-units = 1
+
+[workspace]
+# This is required to keep the package out of a workspace
