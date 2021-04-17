@@ -54,12 +54,13 @@ To facilitate testing without having to run [CipherCompute EAP](https://github.c
 1. Make a change and test it using `./simulate.sh`
 2. commit the change to the local git and note the git commit
 
-Then use the `git-daemon.sh` script to launch a git daemon which exposes this project at
+3. Then use the `git-daemon.sh` script to launch a git daemon which exposes this project at
 `git://localhost:9418/mpc_millionaires`
 
 From the UI on the CipherCompute EAP version
+
 4. Create/update a computation using the git URL above and the git commit you want to test
 5. Run the computation from the UI
 
-See the [CipherCompute EAP](https://github.com/Cosmian/CipherCompute) quick start guide
+See the [CipherCompute EAP](https://github.com/Cosmian/CipherCompute) Quick Start Guide
 on how to use its UI to configure a computation.
