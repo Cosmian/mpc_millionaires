@@ -11,9 +11,9 @@
 
 echo "starting a git daemon...ctrl+c to stop"
 #get the iproute2 package 
-docker exec runtime_0 /bin/bash -c "apt update && apt install iproute2" &> /dev/null
+sudo docker exec runtime_0 /bin/bash -c "apt update && apt install -y iproute2" &> /dev/null
 # grab host IP from comntainer
-hostip=$(docker exec runtime_0 /bin/bash -c "ip route" | awk '/default/ {print $3}')
+hostip=$(sudo docker exec runtime_0 /bin/bash -c "ip route" | awk '/default/ {print $3}')
 project=$(basename "$PWD")
 echo "git URL: git://${hostip}:9418/${project}"
 git daemon --reuseaddr --base-path=$(pwd)/.. --export-all --verbose $(pwd)/..
