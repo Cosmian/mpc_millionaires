@@ -6,7 +6,7 @@
 //!
 //! Note that this macro is also re-exported by the main `tracing` crate.
 //!
-//! *Compiler support: [requires `rustc` 1.40+][msrv]*
+//! *Compiler support: [requires `rustc` 1.42+][msrv]*
 //!
 //! [msrv]: #supported-rust-versions
 //!
@@ -16,7 +16,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! tracing-attributes = "0.1.11"
+//! tracing-attributes = "0.1.15"
 //! ```
 //!
 //! The [`#[instrument]`][instrument] attribute can now be added to a function
@@ -41,7 +41,7 @@
 //! ## Supported Rust Versions
 //!
 //! Tracing is built against the latest stable release. The minimum supported
-//! version is 1.40. The current Tracing version is not guaranteed to build on
+//! version is 1.42. The current Tracing version is not guaranteed to build on
 //! Rust versions earlier than the minimum supported version.
 //!
 //! Tracing follows the same compiler support policies as the rest of the Tokio
@@ -52,11 +52,12 @@
 //! supported compiler version is not considered a semver breaking change as
 //! long as doing so complies with this policy.
 //!
-#![doc(html_root_url = "https://docs.rs/tracing-attributes/0.1.11")]
+#![doc(html_root_url = "https://docs.rs/tracing-attributes/0.1.15")]
 #![doc(
-    html_logo_url = "https://raw.githubusercontent.com/tokio-rs/tracing/master/assets/logo.svg",
+    html_logo_url = "https://raw.githubusercontent.com/tokio-rs/tracing/master/assets/logo-type.png",
     issue_tracker_base_url = "https://github.com/tokio-rs/tracing/issues/"
 )]
+#![cfg_attr(docsrs, deny(broken_intra_doc_links))]
 #![warn(
     missing_debug_implementations,
     missing_docs,
@@ -73,7 +74,6 @@
     patterns_in_fns_without_body,
     private_in_public,
     unconditional_recursion,
-    unused,
     unused_allocation,
     unused_comparisons,
     unused_parens,
@@ -91,35 +91,217 @@ use quote::{quote, quote_spanned, ToTokens, TokenStreamExt as _};
 use syn::ext::IdentExt as _;
 use syn::parse::{Parse, ParseStream};
 use syn::{
-    punctuated::Punctuated, spanned::Spanned, AttributeArgs, Block, Expr, ExprCall, FieldPat,
-    FnArg, Ident, Item, ItemFn, Lit, LitInt, LitStr, Meta, MetaList, MetaNameValue, NestedMeta,
-    Pat, PatIdent, PatReference, PatStruct, PatTuple, PatTupleStruct, PatType, Path, Signature,
-    Stmt, Token,
+    punctuated::Punctuated, spanned::Spanned, Block, Expr, ExprAsync, ExprCall, FieldPat, FnArg,
+    Ident, Item, ItemFn, LitInt, LitStr, Pat, PatIdent, PatReference, PatStruct, PatTuple,
+    PatTupleStruct, PatType, Path, Signature, Stmt, Token, TypePath,
 };
 /// Instruments a function to create and enter a `tracing` [span] every time
 /// the function is called.
 ///
-/// The generated span's name will be the name of the function. Any arguments
-/// to that function will be recorded as fields using [`fmt::Debug`]. To skip
-/// recording a function's or method's argument, pass the argument's name
-/// to the `skip` argument on the `#[instrument]` macro. For example,
-/// `skip` can be used when an argument to an instrumented function does
-/// not implement [`fmt::Debug`], or to exclude an argument with a verbose
-/// or costly Debug implementation. Note that:
+/// By default, the generated span's [name] will be the name of the function,
+/// the span's [target] will be the current module path, and the span's [level]
+/// will be [`INFO`], although these properties can be overridden. Any arguments
+/// to that function will be recorded as fields using [`fmt::Debug`].
+///
+/// # Overriding Span Attributes
+///
+/// To change the [name] of the generated span, add a `name` argument to the
+/// `#[instrument]` macro, followed by an equals sign and a string literal. For
+/// example:
+///
+/// ```
+/// # use tracing_attributes::instrument;
+///
+/// // The generated span's name will be "my_span" rather than "my_function".
+/// #[instrument(name = "my_span")]
+/// pub fn my_function() {
+///     // ... do something incredibly interesting and important ...
+/// }
+/// ```
+///
+/// To override the [target] of the generated span, add a `target` argument to
+/// the `#[instrument]` macro, followed by an equals sign and a string literal
+/// for the new target. The [module path] is still recorded separately. For
+/// example:
+///
+/// ```
+/// pub mod my_module {
+///     # use tracing_attributes::instrument;
+///     // The generated span's target will be "my_crate::some_special_target",
+///     // rather than "my_crate::my_module".
+///     #[instrument(target = "my_crate::some_special_target")]
+///     pub fn my_function() {
+///         // ... all kinds of neat code in here ...
+///     }
+/// }
+/// ```
+///
+/// Finally, to override the [level] of the generated span, add a `level`
+/// argument, followed by an equals sign and a string literal with the name of
+/// the desired level. Level names are not case sensitive. For example:
+///
+/// ```
+/// # use tracing_attributes::instrument;
+/// // The span's level will be TRACE rather than INFO.
+/// #[instrument(level = "trace")]
+/// pub fn my_function() {
+///     // ... I have written a truly marvelous implementation of this function,
+///     // which this example is too narrow to contain ...
+/// }
+/// ```
+///
+/// # Skipping Fields
+///
+/// To skip recording one or more arguments to a function or method, pass
+/// the argument's name inside the `skip()` argument on the `#[instrument]`
+/// macro. This can be used when an argument to an instrumented function does
+/// not implement [`fmt::Debug`], or to exclude an argument with a verbose or
+/// costly `Debug` implementation. Note that:
+///
 /// - multiple argument names can be passed to `skip`.
 /// - arguments passed to `skip` do _not_ need to implement `fmt::Debug`.
 ///
-/// You can also pass additional fields (key-value pairs with arbitrary data)
-/// to the generated span. This is achieved using the `fields` argument on the
-/// `#[instrument]` macro. You can use a string, integer or boolean literal as
-/// a value for each field. The name of the field must be a single valid Rust
-/// identifier, nested (dotted) field names are not supported.
+/// ## Examples
+///
+/// ```
+/// # use tracing_attributes::instrument;
+/// // This type doesn't implement `fmt::Debug`!
+/// struct NonDebug;
+///
+/// // `arg` will be recorded, while `non_debug` will not.
+/// #[instrument(skip(non_debug))]
+/// fn my_function(arg: usize, non_debug: NonDebug) {
+///     // ...
+/// }
+/// ```
+///
+/// Skipping the `self` parameter:
+///
+/// ```
+/// # use tracing_attributes::instrument;
+/// #[derive(Debug)]
+/// struct MyType {
+///    data: Vec<u8>, // Suppose this buffer is often quite long...
+/// }
+///
+/// impl MyType {
+///     // Suppose we don't want to print an entire kilobyte of `data`
+///     // every time this is called...
+///     #[instrument(skip(self))]
+///     pub fn my_method(&mut self, an_interesting_argument: usize) {
+///          // ... do something (hopefully, using all that `data`!)
+///     }
+/// }
+/// ```
+///
+/// # Adding Fields
+///
+/// Additional fields (key-value pairs with arbitrary data) may be added to the
+/// generated span using the `fields` argument on the `#[instrument]` macro. Any
+/// Rust expression can be used as a field value in this manner. These
+/// expressions will be evaluated at the beginning of the function's body, so
+/// arguments to the function may be used in these expressions. Field names may
+/// also be specified *without* values. Doing so will result in an [empty field]
+/// whose value may be recorded later within the function body.
+///
+/// This supports the same [field syntax] as the `span!` and `event!` macros.
 ///
 /// Note that overlap between the names of fields and (non-skipped) arguments
 /// will result in a compile error.
 ///
+/// ## Examples
+///
+/// Adding a new field based on the value of an argument:
+///
+/// ```
+/// # use tracing_attributes::instrument;
+///
+/// // This will record a field named "i" with the value of `i` *and* a field
+/// // named "next" with the value of `i` + 1.
+/// #[instrument(fields(next = i + 1))]
+/// pub fn my_function(i: usize) {
+///     // ...
+/// }
+/// ```
+///
+/// Recording specific properties of a struct as their own fields:
+///
+/// ```
+/// # mod http {
+/// #   pub struct Error;
+/// #   pub struct Response<B> { pub(super) _b: std::marker::PhantomData<B> }
+/// #   pub struct Request<B> { _b: B }
+/// #   impl<B> std::fmt::Debug for Request<B> {
+/// #       fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+/// #           f.pad("request")
+/// #       }
+/// #   }
+/// #   impl<B> Request<B> {
+/// #       pub fn uri(&self) -> &str { "fake" }
+/// #       pub fn method(&self) -> &str { "GET" }
+/// #   }
+/// # }
+/// # use tracing_attributes::instrument;
+///
+/// // This will record the request's URI and HTTP method as their own separate
+/// // fields.
+/// #[instrument(fields(http.uri = req.uri(), http.method = req.method()))]
+/// pub fn handle_request<B>(req: http::Request<B>) -> http::Response<B> {
+///     // ... handle the request ...
+///     # http::Response { _b: std::marker::PhantomData }
+/// }
+/// ```
+///
+/// This can be used in conjunction with `skip` to record only some fields of a
+/// struct:
+/// ```
+/// # use tracing_attributes::instrument;
+/// // Remember the struct with the very large `data` field from the earlier
+/// // example? Now it also has a `name`, which we might want to include in
+/// // our span.
+/// #[derive(Debug)]
+/// struct MyType {
+///    name: &'static str,
+///    data: Vec<u8>,
+/// }
+///
+/// impl MyType {
+///     // This will skip the `data` field, but will include `self.name`,
+///     // formatted using `fmt::Display`.
+///     #[instrument(skip(self), fields(self.name = %self.name))]
+///     pub fn my_method(&mut self, an_interesting_argument: usize) {
+///          // ... do something (hopefully, using all that `data`!)
+///     }
+/// }
+/// ```
+///
+/// Adding an empty field to be recorded later:
+///
+/// ```
+/// # use tracing_attributes::instrument;
+///
+/// // This function does a very interesting and important mathematical calculation.
+/// // Suppose we want to record both the inputs to the calculation *and* its result...
+/// #[instrument(fields(result))]
+/// pub fn do_calculation(input_1: usize, input_2: usize) -> usize {
+///     // Rerform the calculation.
+///     let result = input_1 + input_2;
+///
+///     // Record the result as part of the current span.
+///     tracing::Span::current().record("result", &result);
+///
+///     // Now, the result will also be included on this event!
+///     tracing::info!("calculation complete!");
+///
+///     // ... etc ...
+///     # 0
+/// }
+/// ```
+///
 /// # Examples
+///
 /// Instrumenting a function:
+///
 /// ```
 /// # use tracing_attributes::instrument;
 /// #[instrument]
@@ -167,7 +349,7 @@ use syn::{
 /// }
 /// ```
 ///
-/// To add an additional context to the span, you can pass key-value pairs to `fields`:
+/// To add an additional context to the span, pass key-value pairs to `fields`:
 ///
 /// ```
 /// # use tracing_attributes::instrument;
@@ -188,7 +370,6 @@ use syn::{
 /// }
 /// ```
 ///
-/// If `tracing_futures` is specified as a dependency in `Cargo.toml`,
 /// `async fn`s may also be instrumented:
 ///
 /// ```
@@ -224,11 +405,12 @@ use syn::{
 /// }
 /// ```
 ///
-/// An interesting note on this subject is that references to the `Self`
-/// type inside the `fields` argument are only allowed when the instrumented
-/// function is a method aka. the function receives `self` as an argument.
-/// For example, this *will not work* because it doesn't receive `self`:
-/// ```compile_fail
+/// Note than on `async-trait` <= 0.1.43, references to the `Self`
+/// type inside the `fields` argument were only allowed when the instrumented
+/// function is a method (i.e., the function receives `self` as an argument).
+/// For example, this *used to not work* because the instrument function
+/// didn't receive `self`:
+/// ```
 /// # use tracing::instrument;
 /// use async_trait::async_trait;
 ///
@@ -247,63 +429,94 @@ use syn::{
 /// }
 /// ```
 /// Instead, you should manually rewrite any `Self` types as the type for
-/// which you implement the trait: `#[instrument(fields(tmp = std::any::type_name::<Bar>()))]`.
-
+/// which you implement the trait: `#[instrument(fields(tmp = std::any::type_name::<Bar>()))]`
+/// (or maybe you can just bump `async-trait`).
 ///
 /// [span]: https://docs.rs/tracing/latest/tracing/span/index.html
-/// [`tracing`]: https://github.com/tokio-rs/tracing
+/// [name]: https://docs.rs/tracing/latest/tracing/struct.Metadata.html#method.name
+/// [target]: https://docs.rs/tracing/latest/tracing/struct.Metadata.html#method.target
+/// [level]: https://docs.rs/tracing/latest/tracing/struct.Level.html
+/// [module path]: https://docs.rs/tracing/latest/tracing/struct.Metadata.html#method.module_path
+/// [`INFO`]: https://docs.rs/tracing/latest/tracing/struct.Level.html#associatedconstant.INFO
+/// [empty field]: https://docs.rs/tracing/latest/tracing/field/struct.Empty.html
+/// [field syntax]: https://docs.rs/tracing/latest/tracing/#recording-fields
 /// [`fmt::Debug`]: https://doc.rust-lang.org/std/fmt/trait.Debug.html
 #[proc_macro_attribute]
 pub fn instrument(
     args: proc_macro::TokenStream,
     item: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
-    let input: ItemFn = syn::parse_macro_input!(item as ItemFn);
+    let input = syn::parse_macro_input!(item as ItemFn);
     let args = syn::parse_macro_input!(args as InstrumentArgs);
 
     let instrumented_function_name = input.sig.ident.to_string();
 
-    // check for async_trait-like patterns in the block and wrap the
-    // internal function with Instrument instead of wrapping the
-    // async_trait generated wrapper
+    // check for async_trait-like patterns in the block, and instrument
+    // the future instead of the wrapper
     if let Some(internal_fun) = get_async_trait_info(&input.block, input.sig.asyncness.is_some()) {
         // let's rewrite some statements!
-        let mut stmts: Vec<Stmt> = input.block.stmts.to_vec();
-        for stmt in &mut stmts {
-            if let Stmt::Item(Item::Fn(fun)) = stmt {
-                // instrument the function if we considered it as the one we truly want to trace
-                if fun.sig.ident == internal_fun.name {
-                    *stmt = syn::parse2(gen_body(
-                        fun,
+        let mut out_stmts: Vec<TokenStream> = input
+            .block
+            .stmts
+            .iter()
+            .map(|stmt| stmt.to_token_stream())
+            .collect();
+
+        if let Some((iter, _stmt)) = input
+            .block
+            .stmts
+            .iter()
+            .enumerate()
+            .find(|(_iter, stmt)| *stmt == internal_fun.source_stmt)
+        {
+            // instrument the future by rewriting the corresponding statement
+            out_stmts[iter] = match internal_fun.kind {
+                // async-trait <= 0.1.43
+                AsyncTraitKind::Function(fun) => gen_function(
+                    fun,
+                    args,
+                    instrumented_function_name.as_str(),
+                    internal_fun.self_type.as_ref(),
+                ),
+                // async-trait >= 0.1.44
+                AsyncTraitKind::Async(async_expr) => {
+                    let instrumented_block = gen_block(
+                        &async_expr.block,
+                        &input.sig.inputs,
+                        true,
                         args,
-                        instrumented_function_name,
-                        Some(internal_fun),
-                    ))
-                    .unwrap();
-                    break;
+                        instrumented_function_name.as_str(),
+                        None,
+                    );
+                    let async_attrs = &async_expr.attrs;
+                    quote! {
+                        Box::pin(#(#async_attrs) * async move { #instrumented_block })
+                    }
                 }
-            }
+            };
         }
 
+        let vis = &input.vis;
         let sig = &input.sig;
         let attrs = &input.attrs;
         quote!(
             #(#attrs) *
-            #sig {
-                #(#stmts) *
+            #vis #sig {
+                #(#out_stmts) *
             }
         )
         .into()
     } else {
-        gen_body(&input, args, instrumented_function_name, None).into()
+        gen_function(&input, args, instrumented_function_name.as_str(), None).into()
     }
 }
 
-fn gen_body(
+/// Given an existing function, generate an instrumented version of that function
+fn gen_function(
     input: &ItemFn,
-    mut args: InstrumentArgs,
-    instrumented_function_name: String,
-    async_trait_fun: Option<AsyncTraitInfo>,
+    args: InstrumentArgs,
+    instrumented_function_name: &str,
+    self_type: Option<&syn::TypePath>,
 ) -> proc_macro2::TokenStream {
     // these are needed ahead of time, as ItemFn contains the function body _and_
     // isn't representable inside a quote!/quote_spanned! macro
@@ -333,8 +546,38 @@ fn gen_body(
         ..
     } = sig;
 
-    let err = args.err;
     let warnings = args.warnings();
+
+    let body = gen_block(
+        block,
+        params,
+        asyncness.is_some(),
+        args,
+        instrumented_function_name,
+        self_type,
+    );
+
+    quote!(
+        #(#attrs) *
+        #vis #constness #unsafety #asyncness #abi fn #ident<#gen_params>(#params) #return_type
+        #where_clause
+        {
+            #warnings
+            #body
+        }
+    )
+}
+
+/// Instrument a block
+fn gen_block(
+    block: &Block,
+    params: &Punctuated<FnArg, Token![,]>,
+    async_context: bool,
+    mut args: InstrumentArgs,
+    instrumented_function_name: &str,
+    self_type: Option<&syn::TypePath>,
+) -> proc_macro2::TokenStream {
+    let err = args.err;
 
     // generate the span's name
     let span_name = args
@@ -356,8 +599,8 @@ fn gen_body(
                 FnArg::Receiver(_) => Box::new(iter::once(Ident::new("self", param.span()))),
             })
             // Little dance with new (user-exposed) names and old (internal)
-            // names of identifiers. That way, you can do the following
-            // even though async_trait rewrite "self" as "_self":
+            // names of identifiers. That way, we could do the following
+            // even though async_trait (<=0.1.43) rewrites "self" as "_self":
             // ```
             // #[async_trait]
             // impl Foo for FooImpl {
@@ -366,10 +609,9 @@ fn gen_body(
             // }
             // ```
             .map(|x| {
-                // if we are inside a function generated by async-trait, we
-                // should take care to rewrite "_self" as "self" for
-                // 'user convenience'
-                if async_trait_fun.is_some() && x == "_self" {
+                // if we are inside a function generated by async-trait <=0.1.43, we need to
+                // take care to rewrite "_self" as "self" for 'user convenience'
+                if self_type.is_some() && x == "_self" {
                     (Ident::new("self", x.span()), x)
                 } else {
                     (x.clone(), x)
@@ -389,8 +631,8 @@ fn gen_body(
         let target = args.target();
 
         // filter out skipped fields
-        let mut quoted_fields: Vec<_> = param_names
-            .into_iter()
+        let quoted_fields: Vec<_> = param_names
+            .iter()
             .filter(|(param, _)| {
                 if args.skips.contains(param) {
                     return false;
@@ -410,13 +652,19 @@ fn gen_body(
             .map(|(user_name, real_name)| quote!(#user_name = tracing::field::debug(&#real_name)))
             .collect();
 
-        // when async-trait is in use, replace instances of "self" with "_self" inside the fields values
-        if let (Some(ref async_trait_fun), Some(Fields(ref mut fields))) =
-            (async_trait_fun, &mut args.fields)
-        {
-            let mut replacer = SelfReplacer {
-                ty: async_trait_fun.self_type.clone(),
+        // replace every use of a variable with its original name
+        if let Some(Fields(ref mut fields)) = args.fields {
+            let mut replacer = IdentAndTypesRenamer {
+                idents: param_names,
+                types: Vec::new(),
             };
+
+            // when async-trait <=0.1.43 is in use, replace instances
+            // of the "Self" type inside the fields values
+            if let Some(self_type) = self_type {
+                replacer.types.push(("Self", self_type.clone()));
+            }
+
             for e in fields.iter_mut().filter_map(|f| f.value.as_mut()) {
                 syn::visit_mut::visit_expr_mut(&mut replacer, e);
             }
@@ -439,12 +687,13 @@ fn gen_body(
     // which is `instrument`ed using `tracing-futures`. Otherwise, this will
     // enter the span and then perform the rest of the body.
     // If `err` is in args, instrument any resulting `Err`s.
-    let body = if asyncness.is_some() {
+    if async_context {
         if err {
-            quote_spanned! {block.span()=>
+            quote_spanned!(block.span()=>
                 let __tracing_attr_span = #span;
-                tracing_futures::Instrument::instrument(async move {
+                tracing::Instrument::instrument(async move {
                     match async move { #block }.await {
+                        #[allow(clippy::unit_arg)]
                         Ok(x) => Ok(x),
                         Err(e) => {
                             tracing::error!(error = %e);
@@ -452,11 +701,11 @@ fn gen_body(
                         }
                     }
                 }, __tracing_attr_span).await
-            }
+            )
         } else {
             quote_spanned!(block.span()=>
                 let __tracing_attr_span = #span;
-                    tracing_futures::Instrument::instrument(
+                    tracing::Instrument::instrument(
                         async move { #block },
                         __tracing_attr_span
                     )
@@ -467,7 +716,9 @@ fn gen_body(
         quote_spanned!(block.span()=>
             let __tracing_attr_span = #span;
             let __tracing_attr_guard = __tracing_attr_span.enter();
-            match { #block } {
+            #[allow(clippy::redundant_closure_call)]
+            match (move || #block)() {
+                #[allow(clippy::unit_arg)]
                 Ok(x) => Ok(x),
                 Err(e) => {
                     tracing::error!(error = %e);
@@ -481,17 +732,7 @@ fn gen_body(
             let __tracing_attr_guard = __tracing_attr_span.enter();
             #block
         )
-    };
-
-    quote!(
-        #(#attrs) *
-        #vis #constness #unsafety #asyncness #abi fn #ident<#gen_params>(#params) #return_type
-        #where_clause
-        {
-            #warnings
-            #body
-        }
-    )
+    }
 }
 
 #[derive(Default, Debug)]
@@ -835,6 +1076,20 @@ mod kw {
     syn::custom_keyword!(err);
 }
 
+enum AsyncTraitKind<'a> {
+    // old construction. Contains the function
+    Function(&'a ItemFn),
+    // new construction. Contains a reference to the async block
+    Async(&'a ExprAsync),
+}
+
+struct AsyncTraitInfo<'a> {
+    // statement that must be patched
+    source_stmt: &'a Stmt,
+    kind: AsyncTraitKind<'a>,
+    self_type: Option<syn::TypePath>,
+}
+
 // Get the AST of the inner function we need to hook, if it was generated
 // by async-trait.
 // When we are given a function annotated by async-trait, that function
@@ -842,118 +1097,122 @@ mod kw {
 // user logic, and it is that pinned future that needs to be instrumented.
 // Were we to instrument its parent, we would only collect information
 // regarding the allocation of that future, and not its own span of execution.
-// So we inspect the block of the function to find if it matches the pattern
-// `async fn foo<...>(...) {...}; Box::pin(foo<...>(...))` and we return
-// the name `foo` if that is the case. 'gen_body' will then be able
-// to use that information to instrument the proper function.
+// Depending on the version of async-trait, we inspect the block of the function
+// to find if it matches the pattern
+// `async fn foo<...>(...) {...}; Box::pin(foo<...>(...))` (<=0.1.43), or if
+// it matches `Box::pin(async move { ... }) (>=0.1.44). We the return the
+// statement that must be instrumented, along with some other informations.
+// 'gen_body' will then be able to use that information to instrument the
+// proper function/future.
 // (this follows the approach suggested in
 // https://github.com/dtolnay/async-trait/issues/45#issuecomment-571245673)
-fn get_async_trait_function(block: &Block, block_is_async: bool) -> Option<&ItemFn> {
+fn get_async_trait_info(block: &Block, block_is_async: bool) -> Option<AsyncTraitInfo<'_>> {
     // are we in an async context? If yes, this isn't a async_trait-like pattern
     if block_is_async {
         return None;
     }
 
     // list of async functions declared inside the block
-    let mut inside_funs = Vec::new();
-    // last expression declared in the block (it determines the return
-    // value of the block, so that if we are working on a function
-    // whose `trait` or `impl` declaration is annotated by async_trait,
-    // this is quite likely the point where the future is pinned)
-    let mut last_expr = None;
-
-    // obtain the list of direct internal functions and the last
-    // expression of the block
-    for stmt in &block.stmts {
+    let inside_funs = block.stmts.iter().filter_map(|stmt| {
         if let Stmt::Item(Item::Fn(fun)) = &stmt {
-            // is the function declared as async? If so, this is a good
-            // candidate, let's keep it in hand
+            // If the function is async, this is a candidate
             if fun.sig.asyncness.is_some() {
-                inside_funs.push(fun);
-            }
-        } else if let Stmt::Expr(e) = &stmt {
-            last_expr = Some(e);
-        }
-    }
-
-    // let's play with (too much) pattern matching
-    // is the last expression a function call?
-    if let Some(Expr::Call(ExprCall {
-        func: outside_func,
-        args: outside_args,
-        ..
-    })) = last_expr
-    {
-        if let Expr::Path(path) = outside_func.as_ref() {
-            // is it a call to `Box::pin()`?
-            if "Box::pin" == path_to_string(&path.path) {
-                // does it takes at least an argument? (if it doesn't,
-                // it's not gonna compile anyway, but that's no reason
-                // to (try to) perform an out of bounds access)
-                if outside_args.is_empty() {
-                    return None;
-                }
-                // is the argument to Box::pin a function call itself?
-                if let Expr::Call(ExprCall { func, args, .. }) = &outside_args[0] {
-                    if let Expr::Path(inside_path) = func.as_ref() {
-                        // "stringify" the path of the function called
-                        let func_name = path_to_string(&inside_path.path);
-                        // is this function directly defined insided the current block?
-                        for fun in inside_funs {
-                            if fun.sig.ident == func_name {
-                                // we must hook this function now
-                                return Some(fun);
-                            }
-                        }
-                    }
-                }
+                return Some((stmt, fun));
             }
         }
-    }
-    None
-}
+        None
+    });
 
-struct AsyncTraitInfo {
-    name: String,
-    self_type: Option<syn::TypePath>,
-}
-
-// Return the informations necessary to process a function annotated with async-trait.
-fn get_async_trait_info(block: &Block, block_is_async: bool) -> Option<AsyncTraitInfo> {
-    let fun = get_async_trait_function(block, block_is_async)?;
-
-    // if "_self" is present as an argument, we store its type to be able to rewrite "Self" (the
-    // parameter type) with the type of "_self"
-    let self_type = fun
-        .sig
-        .inputs
-        .iter()
-        .map(|arg| {
-            if let FnArg::Typed(ty) = arg {
-                if let Pat::Ident(PatIdent { ident, .. }) = &*ty.pat {
-                    if ident == "_self" {
-                        let mut ty = &*ty.ty;
-                        // extract the inner type if the argument is "&self" or "&mut self"
-                        if let syn::Type::Reference(syn::TypeReference { elem, .. }) = ty {
-                            ty = &*elem;
-                        }
-                        if let syn::Type::Path(tp) = ty {
-                            return Some(tp.clone());
-                        }
-                    }
-                }
-            }
-
+    // last expression of the block (it determines the return value
+    // of the block, so that if we are working on a function whose
+    // `trait` or `impl` declaration is annotated by async_trait,
+    // this is quite likely the point where the future is pinned)
+    let (last_expr_stmt, last_expr) = block.stmts.iter().rev().find_map(|stmt| {
+        if let Stmt::Expr(expr) = stmt {
+            Some((stmt, expr))
+        } else {
             None
-        })
-        .next();
-    let self_type = match self_type {
-        Some(x) => x,
-        None => None,
+        }
+    })?;
+
+    // is the last expression a function call?
+    let (outside_func, outside_args) = match last_expr {
+        Expr::Call(ExprCall { func, args, .. }) => (func, args),
+        _ => return None,
     };
 
+    // is it a call to `Box::pin()`?
+    let path = match outside_func.as_ref() {
+        Expr::Path(path) => &path.path,
+        _ => return None,
+    };
+    if !path_to_string(path).ends_with("Box::pin") {
+        return None;
+    }
+
+    // Does the call take an argument? If it doesn't,
+    // it's not gonna compile anyway, but that's no reason
+    // to (try to) perform an out of bounds access
+    if outside_args.is_empty() {
+        return None;
+    }
+
+    // Is the argument to Box::pin an async block that
+    // captures its arguments?
+    if let Expr::Async(async_expr) = &outside_args[0] {
+        // check that the move 'keyword' is present
+        async_expr.capture?;
+
+        return Some(AsyncTraitInfo {
+            source_stmt: last_expr_stmt,
+            kind: AsyncTraitKind::Async(async_expr),
+            self_type: None,
+        });
+    }
+
+    // Is the argument to Box::pin a function call itself?
+    let func = match &outside_args[0] {
+        Expr::Call(ExprCall { func, .. }) => func,
+        _ => return None,
+    };
+
+    // "stringify" the path of the function called
+    let func_name = match **func {
+        Expr::Path(ref func_path) => path_to_string(&func_path.path),
+        _ => return None,
+    };
+
+    // Was that function defined inside of the current block?
+    // If so, retrieve the statement where it was declared and the function itself
+    let (stmt_func_declaration, func) = inside_funs
+        .into_iter()
+        .find(|(_, fun)| fun.sig.ident == func_name)?;
+
+    // If "_self" is present as an argument, we store its type to be able to rewrite "Self" (the
+    // parameter type) with the type of "_self"
+    let mut self_type = None;
+    for arg in &func.sig.inputs {
+        if let FnArg::Typed(ty) = arg {
+            if let Pat::Ident(PatIdent { ref ident, .. }) = *ty.pat {
+                if ident == "_self" {
+                    let mut ty = *ty.ty.clone();
+                    // extract the inner type if the argument is "&self" or "&mut self"
+                    if let syn::Type::Reference(syn::TypeReference { elem, .. }) = ty {
+                        ty = *elem;
+                    }
+
+                    if let syn::Type::Path(tp) = ty {
+                        self_type = Some(tp);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
     Some(AsyncTraitInfo {
-        name: fun.sig.ident.to_string(),
+        source_stmt: stmt_func_declaration,
+        kind: AsyncTraitKind::Function(func),
         self_type,
     })
 }
@@ -973,26 +1232,48 @@ fn path_to_string(path: &Path) -> String {
     res
 }
 
-// A visitor struct replacing the "self" and "Self" tokens in user-supplied fields expressions when
-// the function is generated by async-trait.
-struct SelfReplacer {
-    ty: Option<syn::TypePath>,
+/// A visitor struct to replace idents and types in some piece
+/// of code (e.g. the "self" and "Self" tokens in user-supplied
+/// fields expressions when the function is generated by an old
+/// version of async-trait).
+struct IdentAndTypesRenamer<'a> {
+    types: Vec<(&'a str, TypePath)>,
+    idents: Vec<(Ident, Ident)>,
 }
 
-impl syn::visit_mut::VisitMut for SelfReplacer {
+impl<'a> syn::visit_mut::VisitMut for IdentAndTypesRenamer<'a> {
+    // we deliberately compare strings because we want to ignore the spans
+    // If we apply clippy's lint, the behavior changes
+    #[allow(clippy::cmp_owned)]
     fn visit_ident_mut(&mut self, id: &mut Ident) {
-        if id == "self" {
-            *id = Ident::new("_self", id.span())
+        for (old_ident, new_ident) in &self.idents {
+            if id.to_string() == old_ident.to_string() {
+                *id = new_ident.clone();
+            }
         }
     }
 
     fn visit_type_mut(&mut self, ty: &mut syn::Type) {
-        if let syn::Type::Path(syn::TypePath { ref mut path, .. }) = ty {
-            if path_to_string(path) == "Self" {
-                if let Some(ref true_type) = self.ty {
-                    *path = true_type.path.clone();
+        for (type_name, new_type) in &self.types {
+            if let syn::Type::Path(TypePath { path, .. }) = ty {
+                if path_to_string(path) == *type_name {
+                    *ty = syn::Type::Path(new_type.clone());
                 }
             }
+        }
+    }
+}
+
+// A visitor struct that replace an async block by its patched version
+struct AsyncTraitBlockReplacer<'a> {
+    block: &'a Block,
+    patched_block: Block,
+}
+
+impl<'a> syn::visit_mut::VisitMut for AsyncTraitBlockReplacer<'a> {
+    fn visit_block_mut(&mut self, i: &mut Block) {
+        if i == self.block {
+            *i = self.patched_block.clone();
         }
     }
 }

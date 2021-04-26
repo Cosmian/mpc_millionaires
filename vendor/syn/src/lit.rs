@@ -40,7 +40,7 @@ ast_enum_of_structs! {
 
         /// A floating point literal: `1f64` or `1.0e10f64`.
         ///
-        /// Must be finite. May not be infinte or NaN.
+        /// Must be finite. May not be infinite or NaN.
         Float(LitFloat),
 
         /// A boolean literal: `true` or `false`.
@@ -502,6 +502,24 @@ impl From<Literal> for LitFloat {
 impl Display for LitFloat {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         self.repr.token.fmt(formatter)
+    }
+}
+
+impl LitBool {
+    pub fn new(value: bool, span: Span) -> Self {
+        LitBool { value, span }
+    }
+
+    pub fn value(&self) -> bool {
+        self.value
+    }
+
+    pub fn span(&self) -> Span {
+        self.span
+    }
+
+    pub fn set_span(&mut self, span: Span) {
+        self.span = span;
     }
 }
 

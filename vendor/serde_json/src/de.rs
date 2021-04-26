@@ -41,7 +41,7 @@ where
     /// Typically it is more convenient to use one of these methods instead:
     ///
     ///   - Deserializer::from_str
-    ///   - Deserializer::from_bytes
+    ///   - Deserializer::from_slice
     ///   - Deserializer::from_reader
     pub fn new(read: R) -> Self {
         Deserializer {
@@ -2250,7 +2250,7 @@ where
     /// Typically it is more convenient to use one of these methods instead:
     ///
     ///   - Deserializer::from_str(...).into_iter()
-    ///   - Deserializer::from_bytes(...).into_iter()
+    ///   - Deserializer::from_slice(...).into_iter()
     ///   - Deserializer::from_reader(...).into_iter()
     pub fn new(read: R) -> Self {
         let offset = read.byte_offset();
@@ -2432,7 +2432,7 @@ where
 ///     location: String,
 /// }
 ///
-/// fn read_user_from_file<P: AsRef<Path>>(path: P) -> Result<User, Box<Error>> {
+/// fn read_user_from_file<P: AsRef<Path>>(path: P) -> Result<User, Box<dyn Error>> {
 ///     // Open the file in read-only mode with buffer.
 ///     let file = File::open(path)?;
 ///     let reader = BufReader::new(file);

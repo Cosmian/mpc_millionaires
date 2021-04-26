@@ -85,7 +85,7 @@ impl<const P: u32> InputRow<P> {
                 .unwrap_or_else(|_| panic!("cannot read emulate input data for player {}", P));
             let data: Vec<Vec<serde_json::Value>> = serde_json::from_slice(&res)
                 .expect("data input json must be of type Vec<Vec<i64>>");
-            let nb_col = data.len();
+            let nb_col = data.get(0).map(|col| col.len()).unwrap_or_default();
 
             players_data.insert(P, data);
 
@@ -140,15 +140,16 @@ impl<const P: u32> InputRow<P> {
     /// Get next column in this row
     #[cfg(feature = "emulate")]
     pub fn next_col(&mut self) -> Option<Column> {
-        let players_data = PLAYERS_DATA.lock().unwrap();
-
         self.cursor += 1;
         if self.cursor > self.nb_col as i64 {
             self.delete_consumed_line();
 
             return None;
         }
-        let current_row = players_data.get(&P)?.first()?;
+        let current_row = {
+            let players_data = PLAYERS_DATA.lock().unwrap();
+            players_data.get(&P)?.first()?.clone()
+        };
 
         let current_col = current_row.get(self.cursor as usize)?;
 
