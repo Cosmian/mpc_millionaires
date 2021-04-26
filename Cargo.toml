@@ -11,7 +11,7 @@ bench=false
 path="src/main.rs"
 
 [dependencies]
-cosmian_std = { version = "0.1.0" }
+cosmian_std = { version = "0.1" }
 
 [features]
 emulate = ["cosmian_std/emulate"]
