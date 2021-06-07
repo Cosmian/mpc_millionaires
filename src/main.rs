@@ -195,7 +195,7 @@ fn find_tabular<const P: u32>(
     }
 }
 
-/// Rank the values from 1..n provided in tre `values` slice of size `n`.
+/// Rank the values from 1..n provided in the `values` slice of size `n`.
 /// The output slice will contain the rank of the corresponding value in the
 /// `values` input slice i.e input values of:
 ///
