@@ -13,7 +13,7 @@ const ALICE: Player<0> = Player::<0>;
 const BOB: Player<1> = Player::<1>;
 const CHARLIE: Player<2> = Player::<2>;
 
-// the numbér of columns provided by the players
+// the number of columns provided by the players
 // i.e (year, wealth)
 const NUM_COLS: u64 = 2;
 
