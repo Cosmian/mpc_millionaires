@@ -1,0 +1,6 @@
+[participants.0]
+output_column_names = [ "Year", "Total Wealth", "Rank" ]
+[participants.1]
+output_column_names = [ "Year", "Total Wealth", "Rank" ]
+[participants.2]
+output_column_names = [ "Year", "Total Wealth", "Rank" ]
